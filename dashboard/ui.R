@@ -9,10 +9,7 @@ dashboardPage(
   ## DASHBOARD SIDEBAR ----
   dashboardSidebar(
     width = 290,
-    
-    setSliderColor("LightSteelBlue", 1),
-    chooseSliderSkin("Flat"),
-    
+
     sidebarMenu(
       ## welcome ----
       menuItem("WELCOME", tabName = "welcome"),

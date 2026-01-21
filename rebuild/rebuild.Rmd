@@ -26,7 +26,7 @@ if(length(grep("dashboard", dir_main, value = TRUE)) == 0){
 ## these urls should connect to the most recent versions of everything
 gh_api_bhiprep <- "https://api.github.com/repos/OHI-Science/bhi-prep/git/trees/master?recursive=1"
 gh_raw_bhiprep <- "https://raw.githubusercontent.com/OHI-Science/bhi-prep/master/"
-gh_raw_bhi <- "https://raw.githubusercontent.com/OHI-Science/bhi/master/"
+gh_raw_bhi <- "https://raw.githubusercontent.com/OHI-Science/bhi/master"
 
 source(here::here("rebuild", "rebuilding.R"))
 ```
@@ -40,7 +40,7 @@ source(here::here("rebuild", "rebuilding.R"))
 
 ## in R console:
 bhidbconn <- dbConnect(SQLite(), dbname = "dashboard/data/bhi.db")
-sql <- read_lines("rebuild/bhidb.sql") %>% 
+sql <- read_lines("dashboard/data/bhidb.sql") %>% 
   str_remove("\t") %>% 
   paste(collapse = "") %>% 
   str_split("(?<=;)") %>% 
@@ -71,20 +71,20 @@ subbasins <- read_csv(sprintf("%s/%s/layers/rgns_complete.csv", gh_raw_bhi, scen
   distinct(helcom_id, region_id = subbasin_id, subbasin, area_km2 = subbasin_area_km2, subbasin_order)
 
 
-pressures <- read_csv(sprintf("%s%s/conf/goals.csv", gh_raw_bhi, scenario_folder)) %>% 
+pressures <- read_csv(sprintf("%s/%s/conf/goals.csv", gh_raw_bhi, scenario_folder)) %>% 
   filter(!is.na(preindex_function)) %>%
   select(goal, goal_name = name) %>%
-  left_join(read_csv(sprintf("%s%s/conf/pressures_matrix.csv", gh_raw_bhi, scenario_folder))) %>%
+  left_join(read_csv(sprintf("%s/%s/conf/pressures_matrix.csv", gh_raw_bhi, scenario_folder))) %>%
   select(-goal, -element, -element_name) %>%
   tidyr::pivot_longer(cols = sp_invasives:ss_wgi, names_to = "layer", values_to = "weight")
 
-resilience <- read_csv(sprintf("%s%s/conf/goals.csv", gh_raw_bhi, scenario_folder)) %>% 
+resilience <- read_csv(sprintf("%s/%s/conf/goals.csv", gh_raw_bhi, scenario_folder)) %>% 
   filter(!is.na(preindex_function)) %>%
   select(goal, goal_name = name) %>%
-  left_join(read_csv(sprintf("%s%s/conf/resilience_matrix.csv", gh_raw_bhi, scenario_folder))) %>%
+  left_join(read_csv(sprintf("%s/%s/conf/resilience_matrix.csv", gh_raw_bhi, scenario_folder))) %>%
   select(-goal, -element) %>% 
   tidyr::pivot_longer(cols = wgi_all:res_reg_pop, names_to = "layer", values_to = "weighted") %>%
-  left_join(read_csv(sprintf("%s%s/conf/resilience_categories.csv", gh_raw_bhi, scenario_folder))) %>%
+  left_join(read_csv(sprintf("%s/%s/conf/resilience_categories.csv", gh_raw_bhi, scenario_folder))) %>%
   mutate(weight = ifelse(is.na(weighted), NA, weight)) %>% 
   select(goal_name, layer, weight, category, category_type, subcategory)
 
@@ -121,7 +121,7 @@ scores <- read_csv(sprintf("%s%s/scores.csv", gh_raw_bhi, scenario_folder), col_
 ## if not scores.csv may need to be recalculated, 
 ## but also could be that extra layers were calculated but not used
 ghlayers <- sort(list_prep_layers(gh_api_bhiprep))
-lyrcsvfiles <- sort(readr::read_csv(paste0(gh_raw_bhi, "/layers.csv"))$filename)
+lyrcsvfiles <- sort(readr::read_csv(paste0(gh_raw_bhi, "layers.csv"))$filename)
 all(lyrcsvfiles %in% paste0(ghlayers, ".csv"))
  
 ## need year column
@@ -167,6 +167,57 @@ for(tab in c("dataSources", "indexScores")){
     binary = TRUE
   )
 }
+dbDisconnect(bhidbconn)
+```
+
+
+```{r make datalayers table}
+## don't know why there are so many layer names missing from layers.csv in baltic2019draft branch...
+## baltic2019draft is actually the paper version ... there is a GH release for the stage matching the paper
+
+
+## Read layers.csv from baltic2019draft folder (current assessment)
+layers_2019 <- read_csv(sprintf("%s/%s/layers.csv", gh_raw_bhi, scenario_folder), col_types = cols()) %>%
+  select(layer, name_2019 = name) %>%
+  filter(!is.na(layer), layer != "")
+
+## Read layers.csv from baltic folder (previous assessment with more complete names)
+layers_baltic <- read_csv(sprintf("%s/baltic/layers.csv", gh_raw_bhi), col_types = cols()) %>%
+  select(layer, name_baltic = name) %>%
+  filter(!is.na(layer), layer != "")
+
+
+## get layers in database for pressures and resilience dimensions
+## these are the only layers that we need the names for, the status info is reported by sources
+pres_res_layers <- unique(c(pressures$layer, resilience$layer))
+
+## Merge with layer names, preferring baltic names when available, then 2019 names
+dataLayers <- data.frame(layer = pres_res_layers) %>%
+  left_join(layers_baltic, by = "layer") %>%
+  left_join(layers_2019, by = "layer") %>%
+  mutate(full_layer_name = case_when(
+    !is.na(name_baltic) & name_baltic != "" ~ name_baltic,
+    !is.na(name_2019) & name_2019 != "" ~ name_2019
+  )) %>%
+  mutate(full_layer_name = case_when(
+      layer == "hab_oxygen_debt" ~ "Oxygen debt",
+      layer == "hab_illegal_oil" ~ "Illegal oil",
+      layer == "hab_bottom_trawl" ~ "Bottom trawling",
+      layer == "po_atmos_pcdd" ~ "Atmospheric deposition of PCDD/F",
+      layer == "res_biodiversity" ~ "Biodiversity status",
+      TRUE ~ full_layer_name
+  )) |> 
+  select(layer, full_layer_name)
+
+## Write to database
+bhidbconn <- dbConnect(SQLite(), dbname = "dashboard/data/bhi.db")
+dbWriteTable(
+  conn = bhidbconn,
+  name = "DataLayers",
+  value = dataLayers,
+  row.names = FALSE,
+  overwrite = TRUE
+)
 dbDisconnect(bhidbconn)
 ```
 
