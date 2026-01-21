@@ -16,9 +16,9 @@ gh_raw_bhiprep <- "https://raw.githubusercontent.com/OHI-Science/bhi-prep/master
 gh_prep <- "https://github.com/OHI-Science/bhi-prep"
 
 ## Set main App Directory ----
-dir_main <- here::here()
-if(length(grep("dashboard", dir_main, value = TRUE)) == 0){
-  dir_main <- here::here("dashboard")
+dir_main <- here::here("dashboard")
+if(!file.exists(dir_main)){
+  dir_main <- here::here()
 }
 
 ## Creating Shiny content Functions ----
